@@ -1,0 +1,1287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Pre-Verified Numbers Management</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+const { useState, useEffect } = React;
+
+const App = () => {
+    const [activeTab, setActiveTab] = useState('numbers');
+    const [numbers, setNumbers] = useState([]);
+    const [businessPortfolioId, setBusinessPortfolioId] = useState('');
+    const [accessToken, setAccessToken] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [message, setMessage] = useState({ type: '', text: '' });
+
+    // Load environment variables on component mount
+    useEffect(() => {
+        // In a real environment, these would come from environment variables
+        // For now, we'll load them from localStorage or prompt user to set them
+        const savedPortfolioId = localStorage.getItem('businessPortfolioId');
+        const savedAccessToken = localStorage.getItem('accessToken');
+        
+        if (savedPortfolioId) setBusinessPortfolioId(savedPortfolioId);
+        if (savedAccessToken) setAccessToken(savedAccessToken);
+        
+        // Load existing numbers when credentials are available
+        if (savedPortfolioId && savedAccessToken) {
+            loadExistingNumbers();
+        }
+    }, []);
+
+    // Save credentials to localStorage when they change
+    useEffect(() => {
+        if (businessPortfolioId) {
+            localStorage.setItem('businessPortfolioId', businessPortfolioId);
+        }
+        if (accessToken) {
+            localStorage.setItem('accessToken', accessToken);
+        }
+    }, [businessPortfolioId, accessToken]);
+
+    const loadExistingNumbers = async () => {
+        if (!businessPortfolioId || !accessToken) return;
+        
+        setLoading(true);
+        try {
+            const response = await fetch(`https://graph.facebook.com/v18.0/${businessPortfolioId}/phone_numbers?fields=id,display_phone_number,verified_name,code_verification_status,quality_rating,platform_type,throughput,webhook_configuration,account_mode,registration_status`, {
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`
+                }
+            });
+
+            const data = await response.json();
+            if (data.data) {
+                setNumbers(data.data.map(num => ({
+                    id: num.id,
+                    phone_number: num.display_phone_number || num.phone_number,
+                    verified_name: num.verified_name || 'N/A',
+                    status: num.code_verification_status || 'unknown',
+                    registration_status: num.registration_status || 'unknown',
+                    quality_rating: num.quality_rating || 'N/A',
+                    platform_type: num.platform_type || 'CLOUD_API',
+                    throughput: num.throughput || { level: 'STANDARD' },
+                    webhook_configuration: num.webhook_configuration || {},
+                    account_mode: num.account_mode || 'LIVE',
+                    created_at: num.created_time || new Date().toISOString()
+                })));
+            }
+        } catch (error) {
+            console.error('Error loading numbers:', error);
+            showMessage('error', 'Failed to load phone numbers');
+        }
+        setLoading(false);
+    };
+
+    const showMessage = (type, text) => {
+        setMessage({ type, text });
+        setTimeout(() => setMessage({ type: '', text: '' }), 5000);
+    };
+
+    const deregisterPhoneNumber = async (numberId) => {
+        if (!confirm('Are you sure you want to deregister this phone number? This action cannot be undone.')) {
+            return;
+        }
+
+        setLoading(true);
+        try {
+            const response = await fetch(`https://graph.facebook.com/v18.0/${numberId}/deregister`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const data = await response.json();
+            if (data.success) {
+                showMessage('success', 'Phone number deregistered successfully');
+                loadExistingNumbers();
+            } else {
+                showMessage('error', data.error?.message || 'Failed to deregister phone number');
+            }
+        } catch (error) {
+            showMessage('error', 'Network error: ' + error.message);
+        }
+        setLoading(false);
+    };
+
+    const PhoneNumberManagement = () => {
+        const [phoneNumber, setPhoneNumber] = useState('');
+        const [selectedNumber, setSelectedNumber] = useState(null);
+        const [verificationCode, setVerificationCode] = useState('');
+        const [codeMethod, setCodeMethod] = useState('SMS');
+        const [searchTerm, setSearchTerm] = useState('');
+        const [statusFilter, setStatusFilter] = useState('all');
+        const [platformFilter, setPlatformFilter] = useState('all');
+        const [accountModeFilter, setAccountModeFilter] = useState('all');
+
+        const filteredNumbers = numbers.filter(number => {
+            const matchesSearch = number.phone_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                                number.verified_name.toLowerCase().includes(searchTerm.toLowerCase());
+            const matchesStatus = statusFilter === 'all' || number.status === statusFilter;
+            const matchesPlatform = platformFilter === 'all' || number.platform_type === platformFilter;
+            const matchesAccountMode = accountModeFilter === 'all' || number.account_mode === accountModeFilter;
+            
+            return matchesSearch && matchesStatus && matchesPlatform && matchesAccountMode;
+        });
+
+        const addPhoneNumber = async () => {
+            if (!businessPortfolioId || !accessToken || !phoneNumber) {
+                showMessage('error', 'Please fill in all required fields');
+                return;
+            }
+
+            setLoading(true);
+            try {
+                const response = await fetch(`https://graph.facebook.com/v18.0/${businessPortfolioId}/add_phone_numbers`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ phone_number: phoneNumber })
+                });
+
+                const data = await response.json();
+                if (data.id) {
+                    setNumbers([...numbers, {
+                        id: data.id,
+                        phone_number: phoneNumber,
+                        status: 'unverified',
+                        created_at: new Date().toISOString()
+                    }]);
+                    setPhoneNumber('');
+                    showMessage('success', 'Phone number added successfully');
+                } else {
+                    showMessage('error', data.error?.message || 'Failed to add phone number');
+                }
+            } catch (error) {
+                showMessage('error', 'Network error: ' + error.message);
+            }
+            setLoading(false);
+        };
+
+        const requestVerificationCode = async (numberId) => {
+            setSelectedNumber(numberId);
+            setLoading(true);
+            try {
+                const response = await fetch(`https://graph.facebook.com/v18.0/${numberId}/request_code`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        code_method: codeMethod,
+                        language: 'en_US'
+                    })
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    showMessage('success', `Verification code sent via ${codeMethod}`);
+                } else {
+                    showMessage('error', data.error?.message || 'Failed to send verification code');
+                }
+            } catch (error) {
+                showMessage('error', 'Network error: ' + error.message);
+            }
+            setLoading(false);
+        };
+
+        const verifyPhoneNumber = async () => {
+            if (!selectedNumber || !verificationCode) {
+                showMessage('error', 'Please enter verification code');
+                return;
+            }
+
+            setLoading(true);
+            try {
+                const response = await fetch(`https://graph.facebook.com/v18.0/${selectedNumber}/verify_code`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ code: verificationCode })
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    setNumbers(numbers.map(num => 
+                        num.id === selectedNumber 
+                            ? { ...num, status: 'verified', verified_at: new Date().toISOString() } 
+                            : num
+                    ));
+                    showMessage('success', 'Phone number verified successfully');
+                    setSelectedNumber(null);
+                    setVerificationCode('');
+                } else {
+                    showMessage('error', data.error?.message || 'Invalid verification code');
+                }
+            } catch (error) {
+                showMessage('error', 'Network error: ' + error.message);
+            }
+            setLoading(false);
+        };
+
+        const registerPhoneNumber = async (numberId, method = 'sms') => {
+            setLoading(true);
+            try {
+                const response = await fetch(`https://graph.facebook.com/v18.0/${numberId}/register`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        messaging_product: 'whatsapp',
+                        pin: verificationCode
+                    })
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    showMessage('success', 'Phone number registered successfully');
+                    loadExistingNumbers();
+                } else {
+                    showMessage('error', data.error?.message || 'Failed to register phone number');
+                }
+            } catch (error) {
+                showMessage('error', 'Network error: ' + error.message);
+            }
+            setLoading(false);
+        };
+
+        return (
+            <div className="space-y-6">
+                <div className="bg-white rounded-lg shadow-md p-6">
+                    <h3 className="text-lg font-semibold mb-4">Add Pre-Verified Phone Number</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <input
+                            type="text"
+                            placeholder="Phone number (e.g., +1234567890)"
+                            value={phoneNumber}
+                            onChange={(e) => setPhoneNumber(e.target.value)}
+                            className="px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                        <button
+                            onClick={addPhoneNumber}
+                            disabled={loading}
+                            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                        >
+                            {loading ? 'Adding...' : 'Add Phone Number'}
+                        </button>
+                    </div>
+                </div>
+
+                <div className="bg-white rounded-lg shadow-md p-6">
+                    <div className="flex justify-between items-center mb-4">
+                        <h3 className="text-lg font-semibold">Phone Numbers</h3>
+                        <div className="text-sm text-gray-500">
+                            {filteredNumbers.length} of {numbers.length} numbers
+                        </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                        <div>
+                            <label className="block text-sm font-medium mb-2">Search</label>
+                            <input
+                                type="text"
+                                placeholder="Search phone numbers or names"
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium mb-2">Status</label>
+                            <select
+                                value={statusFilter}
+                                onChange={(e) => setStatusFilter(e.target.value)}
+                                className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                                <option value="all">All Statuses</option>
+                                <option value="VERIFIED">Verified</option>
+                                <option value="UNVERIFIED">Unverified</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium mb-2">Platform</label>
+                            <select
+                                value={platformFilter}
+                                onChange={(e) => setPlatformFilter(e.target.value)}
+                                className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                                <option value="all">All Platforms</option>
+                                <option value="CLOUD_API">Cloud API</option>
+                                <option value="ON_PREMISES">On-Premises</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium mb-2">Mode</label>
+                            <select
+                                value={accountModeFilter}
+                                onChange={(e) => setAccountModeFilter(e.target.value)}
+                                className="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                                <option value="all">All Modes</option>
+                                <option value="LIVE">Live</option>
+                                <option value="SANDBOX">Sandbox</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                        <table className="w-full">
+                            <thead>
+                                <tr className="border-b bg-gray-50">
+                                    <th className="text-left py-3 px-2 text-sm font-medium">Phone Number</th>
+                                    <th className="text-left py-3 px-2 text-sm font-medium">Verified Name</th>
+                                    <th className="text-left py-3 px-2 text-sm font-medium">Status</th>
+                                    <th className="text-left py-3 px-2 text-sm font-medium">Registration</th>
+                                    <th className="text-left py-3 px-2 text-sm font-medium">Quality</th>
+                                    <th className="text-left py-3 px-2 text-sm font-medium">Platform</th>
+                                    <th className="text-left py-3 px-2 text-sm font-medium">Mode</th>
+                                    <th className="text-left py-3 px-2 text-sm font-medium">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {filteredNumbers.map((number) => (
+                                    <tr key={number.id} className="border-b hover:bg-gray-50">
+                                        <td className="py-3 px-2">
+                                            <div className="font-medium">{number.phone_number}</div>
+                                            <div className="text-xs text-gray-500">{number.id}</div>
+                                        </td>
+                                        <td className="py-3 px-2 text-sm">{number.verified_name}</td>
+                                        <td className="py-3 px-2">
+                                            <span className={`px-2 py-1 rounded text-xs font-medium ${
+                                                number.status === 'VERIFIED' 
+                                                    ? 'bg-green-100 text-green-800' 
+                                                    : 'bg-yellow-100 text-yellow-800'
+                                            }`}>
+                                                {number.status}
+                                            </span>
+                                        </td>
+                                        <td className="py-3 px-2">
+                                            <span className={`px-2 py-1 rounded text-xs font-medium ${
+                                                number.registration_status === 'REGISTERED' 
+                                                    ? 'bg-blue-100 text-blue-800' 
+                                                    : 'bg-gray-100 text-gray-800'
+                                            }`}>
+                                                {number.registration_status}
+                                            </span>
+                                        </td>
+                                        <td className="py-3 px-2 text-sm">{number.quality_rating}</td>
+                                        <td className="py-3 px-2">
+                                            <span className="text-xs bg-gray-100 px-2 py-1 rounded">
+                                                {number.platform_type}
+                                            </span>
+                                        </td>
+                                        <td className="py-3 px-2">
+                                            <span className={`text-xs px-2 py-1 rounded ${
+                                                number.account_mode === 'LIVE' 
+                                                    ? 'bg-green-100 text-green-800' 
+                                                    : 'bg-orange-100 text-orange-800'
+                                            }`}>
+                                                {number.account_mode}
+                                            </span>
+                                        </td>
+                                        <td className="py-3 px-2">
+                                            <div className="flex gap-2">
+                                                {number.status === 'UNVERIFIED' && (
+                                                    <button
+                                                        onClick={() => requestVerificationCode(number.id)}
+                                                        className="text-blue-600 hover:underline text-xs"
+                                                        title="Request verification code"
+                                                    >
+                                                        <i className="fas fa-sms"></i>
+                                                    </button>
+                                                )}
+                                                {number.registration_status === 'UNREGISTERED' && number.status === 'VERIFIED' && (
+                                                    <button
+                                                        onClick={() => registerPhoneNumber(number.id)}
+                                                        className="text-green-600 hover:underline text-xs"
+                                                        title="Register number"
+                                                    >
+                                                        <i className="fas fa-check-circle"></i>
+                                                    </button>
+                                                )}
+                                                {number.registration_status === 'REGISTERED' && (
+                                                    <button
+                                                        onClick={() => deregisterPhoneNumber(number.id)}
+                                                        className="text-red-600 hover:underline text-xs"
+                                                        title="Deregister number"
+                                                    >
+                                                        <i className="fas fa-times-circle"></i>
+                                                    </button>
+                                                )}
+                                                <button
+                                                    onClick={() => {/* TODO: Show details modal */}}
+                                                    className="text-gray-600 hover:underline text-xs"
+                                                    title="View details"
+                                                >
+                                                    <i className="fas fa-info-circle"></i>
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                        {filteredNumbers.length === 0 && (
+                            <div className="text-center py-8 text-gray-500">
+                                {numbers.length === 0 ? 'No phone numbers found' : 'No numbers match your filters'}
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {selectedNumber && (
+                    <div className="bg-white rounded-lg shadow-md p-6">
+                        <h3 className="text-lg font-semibold mb-4">Verify Phone Number</h3>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium mb-2">Verification Method</label>
+                                <select
+                                    value={codeMethod}
+                                    onChange={(e) => setCodeMethod(e.target.value)}
+                                    className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                >
+                                    <option value="SMS">SMS</option>
+                                    <option value="VOICE">Voice Call</option>
+                                </select>
+                            </div>
+                            
+                            <div className="bg-blue-50 p-4 rounded-lg">
+                                <h4 className="font-medium text-blue-800 mb-2">
+                                    <i className="fas fa-info-circle mr-2"></i>Check Verification Code
+                                </h4>
+                                <p className="text-sm text-blue-700 mb-3">
+                                    To check the verification code for your number, visit the NOC Tools portal:
+                                </p>
+                                <div className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        value={numbers.find(n => n.id === selectedNumber)?.phone_number || ''}
+                                        readOnly
+                                        className="flex-1 px-3 py-2 bg-white border rounded text-sm"
+                                        placeholder="Phone number"
+                                    />
+                                    <button
+                                        onClick={() => {
+                                            const phoneNumber = numbers.find(n => n.id === selectedNumber)?.phone_number;
+                                            if (phoneNumber) {
+                                                window.open(`https://admin.omnitelecom.co.il/REPORTS/NOCTools/GETConfirmationcodeforportingnumberEnternumberwithcountrycode.aspx?number=${encodeURIComponent(phoneNumber)}`, '_blank');
+                                            }
+                                        }}
+                                        className="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700"
+                                    >
+                                        <i className="fas fa-external-link-alt mr-1"></i>Check Code
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium mb-2">Verification Code</label>
+                                <div className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        placeholder="Enter verification code"
+                                        value={verificationCode}
+                                        onChange={(e) => setVerificationCode(e.target.value)}
+                                        className="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    />
+                                    <button
+                                        onClick={verifyPhoneNumber}
+                                        disabled={loading}
+                                        className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 disabled:opacity-50"
+                                    >
+                                        Verify
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </div>
+        );
+    };
+
+    const PhoneManagement = () => {
+        const [selectedNumbers, setSelectedNumbers] = useState([]);
+        const [bulkAction, setBulkAction] = useState('');
+        const [registrationWizard, setRegistrationWizard] = useState({ show: false, step: 1, selectedNumber: null });
+
+        const handleNumberSelection = (numberId) => {
+            setSelectedNumbers(prev => 
+                prev.includes(numberId) 
+                    ? prev.filter(id => id !== numberId)
+                    : [...prev, numberId]
+            );
+        };
+
+        const performBulkAction = async () => {
+            if (!bulkAction || selectedNumbers.length === 0) return;
+
+            setLoading(true);
+            for (const numberId of selectedNumbers) {
+                try {
+                    if (bulkAction === 'deregister') {
+                        await deregisterPhoneNumber(numberId);
+                    }
+                } catch (error) {
+                    console.error(`Failed to ${bulkAction} ${numberId}:`, error);
+                }
+            }
+            setSelectedNumbers([]);
+            setBulkAction('');
+            loadExistingNumbers();
+            setLoading(false);
+        };
+
+        const RegistrationWizard = () => {
+            const [registrationData, setRegistrationData] = useState({
+                method: 'cloud_api',
+                pin: '',
+                webhook_url: ''
+            });
+
+            const startRegistration = async () => {
+                if (!registrationWizard.selectedNumber) return;
+
+                setLoading(true);
+                try {
+                    const response = await fetch(`https://graph.facebook.com/v18.0/${registrationWizard.selectedNumber}/register`, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${accessToken}`,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            messaging_product: 'whatsapp',
+                            pin: registrationData.pin
+                        })
+                    });
+
+                    const data = await response.json();
+                    if (data.success) {
+                        showMessage('success', 'Phone number registered successfully');
+                        setRegistrationWizard({ show: false, step: 1, selectedNumber: null });
+                        loadExistingNumbers();
+                    } else {
+                        showMessage('error', data.error?.message || 'Registration failed');
+                    }
+                } catch (error) {
+                    showMessage('error', 'Network error: ' + error.message);
+                }
+                setLoading(false);
+            };
+
+            return registrationWizard.show && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-lg p-6 w-full max-w-md">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-semibold">Register Phone Number</h3>
+                            <button
+                                onClick={() => setRegistrationWizard({ show: false, step: 1, selectedNumber: null })}
+                                className="text-gray-500 hover:text-gray-700"
+                            >
+                                <i className="fas fa-times"></i>
+                            </button>
+                        </div>
+
+                        <div className="space-y-4">
+                            <div className="bg-blue-50 p-4 rounded-lg">
+                                <p className="text-sm text-blue-800">
+                                    <i className="fas fa-info-circle mr-2"></i>
+                                    Registration must be completed within 14 days of embedded signup.
+                                </p>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium mb-2">Registration Method</label>
+                                <select
+                                    value={registrationData.method}
+                                    onChange={(e) => setRegistrationData(prev => ({ ...prev, method: e.target.value }))}
+                                    className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                >
+                                    <option value="cloud_api">Cloud API</option>
+                                    <option value="on_premises">On-Premises API</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium mb-2">Verification PIN</label>
+                                <input
+                                    type="text"
+                                    placeholder="Enter 6-digit PIN"
+                                    value={registrationData.pin}
+                                    onChange={(e) => setRegistrationData(prev => ({ ...prev, pin: e.target.value }))}
+                                    className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    maxLength="6"
+                                />
+                            </div>
+
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={() => setRegistrationWizard({ show: false, step: 1, selectedNumber: null })}
+                                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={startRegistration}
+                                    disabled={!registrationData.pin || loading}
+                                    className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                                >
+                                    {loading ? 'Registering...' : 'Register'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const unregisteredNumbers = numbers.filter(n => n.registration_status !== 'REGISTERED');
+        const registeredNumbers = numbers.filter(n => n.registration_status === 'REGISTERED');
+
+        return (
+            <div className="space-y-6">
+                <RegistrationWizard />
+                
+                <div className="bg-white rounded-lg shadow-md p-6">
+                    <h3 className="text-lg font-semibold mb-4">Registration Management</h3>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                        <div className="bg-yellow-50 p-4 rounded-lg text-center">
+                            <div className="text-2xl font-bold text-yellow-600">{unregisteredNumbers.length}</div>
+                            <div className="text-sm text-gray-600">Pending Registration</div>
+                        </div>
+                        <div className="bg-green-50 p-4 rounded-lg text-center">
+                            <div className="text-2xl font-bold text-green-600">{registeredNumbers.length}</div>
+                            <div className="text-sm text-gray-600">Registered</div>
+                        </div>
+                        <div className="bg-blue-50 p-4 rounded-lg text-center">
+                            <div className="text-2xl font-bold text-blue-600">{numbers.length}</div>
+                            <div className="text-sm text-gray-600">Total Numbers</div>
+                        </div>
+                    </div>
+
+                    {unregisteredNumbers.length > 0 && (
+                        <div className="bg-yellow-50 p-4 rounded-lg mb-6">
+                            <h4 className="font-medium text-yellow-800 mb-3">
+                                <i className="fas fa-clock mr-2"></i>Numbers Awaiting Registration
+                            </h4>
+                            <div className="space-y-2">
+                                {unregisteredNumbers.map(number => (
+                                    <div key={number.id} className="flex items-center justify-between bg-white p-3 rounded">
+                                        <div>
+                                            <div className="font-medium">{number.phone_number}</div>
+                                            <div className="text-sm text-gray-500">
+                                                Added: {new Date(number.created_at).toLocaleDateString()}
+                                            </div>
+                                        </div>
+                                        <button
+                                            onClick={() => setRegistrationWizard({ 
+                                                show: true, 
+                                                step: 1, 
+                                                selectedNumber: number.id 
+                                            })}
+                                            className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm"
+                                        >
+                                            Register Now
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                <div className="bg-white rounded-lg shadow-md p-6">
+                    <div className="flex justify-between items-center mb-4">
+                        <h3 className="text-lg font-semibold">Bulk Operations</h3>
+                        {selectedNumbers.length > 0 && (
+                            <div className="flex gap-2">
+                                <select
+                                    value={bulkAction}
+                                    onChange={(e) => setBulkAction(e.target.value)}
+                                    className="px-3 py-2 border rounded-lg text-sm"
+                                >
+                                    <option value="">Select Action</option>
+                                    <option value="deregister">Deregister</option>
+                                    <option value="update_webhook">Update Webhook</option>
+                                </select>
+                                <button
+                                    onClick={performBulkAction}
+                                    disabled={!bulkAction || loading}
+                                    className="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 disabled:opacity-50 text-sm"
+                                >
+                                    Apply to {selectedNumbers.length} numbers
+                                </button>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="overflow-x-auto">
+                        <table className="w-full">
+                            <thead>
+                                <tr className="border-b bg-gray-50">
+                                    <th className="text-left py-2 px-2 w-8">
+                                        <input
+                                            type="checkbox"
+                                            onChange={(e) => {
+                                                if (e.target.checked) {
+                                                    setSelectedNumbers(numbers.map(n => n.id));
+                                                } else {
+                                                    setSelectedNumbers([]);
+                                                }
+                                            }}
+                                            checked={selectedNumbers.length === numbers.length && numbers.length > 0}
+                                        />
+                                    </th>
+                                    <th className="text-left py-2 px-2 text-sm font-medium">Phone Number</th>
+                                    <th className="text-left py-2 px-2 text-sm font-medium">Status</th>
+                                    <th className="text-left py-2 px-2 text-sm font-medium">Registration</th>
+                                    <th className="text-left py-2 px-2 text-sm font-medium">Platform</th>
+                                    <th className="text-left py-2 px-2 text-sm font-medium">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {numbers.map((number) => (
+                                    <tr key={number.id} className="border-b hover:bg-gray-50">
+                                        <td className="py-2 px-2">
+                                            <input
+                                                type="checkbox"
+                                                checked={selectedNumbers.includes(number.id)}
+                                                onChange={() => handleNumberSelection(number.id)}
+                                            />
+                                        </td>
+                                        <td className="py-2 px-2">
+                                            <div className="font-medium">{number.phone_number}</div>
+                                            <div className="text-xs text-gray-500">{number.verified_name}</div>
+                                        </td>
+                                        <td className="py-2 px-2">
+                                            <span className={`px-2 py-1 rounded text-xs ${
+                                                number.status === 'VERIFIED' 
+                                                    ? 'bg-green-100 text-green-800' 
+                                                    : 'bg-yellow-100 text-yellow-800'
+                                            }`}>
+                                                {number.status}
+                                            </span>
+                                        </td>
+                                        <td className="py-2 px-2">
+                                            <span className={`px-2 py-1 rounded text-xs ${
+                                                number.registration_status === 'REGISTERED' 
+                                                    ? 'bg-blue-100 text-blue-800' 
+                                                    : 'bg-gray-100 text-gray-800'
+                                            }`}>
+                                                {number.registration_status}
+                                            </span>
+                                        </td>
+                                        <td className="py-2 px-2">
+                                            <span className="text-xs bg-gray-100 px-2 py-1 rounded">
+                                                {number.platform_type}
+                                            </span>
+                                        </td>
+                                        <td className="py-2 px-2">
+                                            <div className="flex gap-2">
+                                                {number.registration_status === 'UNREGISTERED' && (
+                                                    <button
+                                                        onClick={() => setRegistrationWizard({ 
+                                                            show: true, 
+                                                            step: 1, 
+                                                            selectedNumber: number.id 
+                                                        })}
+                                                        className="text-blue-600 hover:underline text-xs"
+                                                        title="Register"
+                                                    >
+                                                        <i className="fas fa-play-circle"></i>
+                                                    </button>
+                                                )}
+                                                {number.registration_status === 'REGISTERED' && (
+                                                    <button
+                                                        onClick={() => deregisterPhoneNumber(number.id)}
+                                                        className="text-red-600 hover:underline text-xs"
+                                                        title="Deregister"
+                                                    >
+                                                        <i className="fas fa-stop-circle"></i>
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
+    const EmbeddedSignupConfig = () => {
+        const [config, setConfig] = useState({
+            setup: {
+                features: ['whatsapp_business_management', 'whatsapp_business_messaging'],
+                sessionInfoVersion: 3,
+                preVerifiedPhone: {
+                    ids: []
+                }
+            },
+            businessName: '',
+            businessCategory: '',
+            businessDescription: ''
+        });
+
+        const updateConfig = (field, value) => {
+            setConfig(prev => ({
+                ...prev,
+                [field]: value
+            }));
+        };
+
+        const generateEmbeddedSignupURL = () => {
+            const verifiedNumbers = numbers.filter(n => n.status === 'verified');
+            const phoneIds = verifiedNumbers.map(n => n.id);
+            
+            const setupConfig = {
+                ...config.setup,
+                preVerifiedPhone: { ids: phoneIds }
+            };
+
+            const encodedSetup = encodeURIComponent(JSON.stringify(setupConfig));
+            return `https://www.facebook.com/v18.0/dialog/whatsapp_business_embedded_signup?app_id=YOUR_APP_ID&redirect_uri=YOUR_REDIRECT_URI&setup=${encodedSetup}`;
+        };
+
+        return (
+            <div className="space-y-6">
+                <div className="bg-white rounded-lg shadow-md p-6">
+                    <h3 className="text-lg font-semibold mb-4">Business Profile Configuration</h3>
+                    <div className="space-y-4">
+                        <div>
+                            <label className="block text-sm font-medium mb-2">Business Name</label>
+                            <input
+                                type="text"
+                                value={config.businessName}
+                                onChange={(e) => updateConfig('businessName', e.target.value)}
+                                className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium mb-2">Business Category</label>
+                            <select
+                                value={config.businessCategory}
+                                onChange={(e) => updateConfig('businessCategory', e.target.value)}
+                                className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                                <option value="">Select category</option>
+                                <option value="RETAIL">Retail</option>
+                                <option value="TRAVEL">Travel</option>
+                                <option value="RESTAURANT">Restaurant</option>
+                                <option value="OTHER">Other</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium mb-2">Business Description</label>
+                            <textarea
+                                value={config.businessDescription}
+                                onChange={(e) => updateConfig('businessDescription', e.target.value)}
+                                rows={4}
+                                className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                        </div>
+                    </div>
+                </div>
+
+                <div className="bg-white rounded-lg shadow-md p-6">
+                    <h3 className="text-lg font-semibold mb-4">Verified Numbers for Embedded Signup</h3>
+                    <div className="space-y-4">
+                        <div className="bg-blue-50 p-4 rounded-lg">
+                            <p className="text-sm text-blue-800">
+                                <i className="fas fa-info-circle mr-2"></i>
+                                Only verified phone numbers can be included in the embedded signup flow.
+                            </p>
+                        </div>
+                        <div className="space-y-2">
+                            {numbers.filter(n => n.status === 'verified').map(number => (
+                                <div key={number.id} className="flex items-center justify-between p-3 bg-gray-50 rounded">
+                                    <span>{number.phone_number}</span>
+                                    <span className="text-green-600"><i className="fas fa-check-circle"></i> Verified</span>
+                                </div>
+                            ))}
+                        </div>
+                        {numbers.filter(n => n.status === 'verified').length === 0 && (
+                            <p className="text-gray-500 text-center py-4">No verified numbers available</p>
+                        )}
+                    </div>
+                </div>
+
+                <div className="bg-white rounded-lg shadow-md p-6">
+                    <h3 className="text-lg font-semibold mb-4">Embedded Signup URL</h3>
+                    <div className="bg-gray-100 p-4 rounded font-mono text-sm break-all">
+                        {generateEmbeddedSignupURL()}
+                    </div>
+                    <button
+                        onClick={() => navigator.clipboard.writeText(generateEmbeddedSignupURL())}
+                        className="mt-4 bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700"
+                    >
+                        <i className="fas fa-copy mr-2"></i>Copy URL
+                    </button>
+                </div>
+            </div>
+        );
+    };
+
+    const StatusMonitoring = () => {
+        const calculateDaysUntilExpiry = (createdAt) => {
+            const created = new Date(createdAt);
+            const expiry = new Date(created);
+            expiry.setDate(expiry.getDate() + 90);
+            const now = new Date();
+            const daysLeft = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
+            return daysLeft;
+        };
+
+        const getQualityRatingColor = (rating) => {
+            switch(rating) {
+                case 'GREEN': return 'bg-green-100 text-green-800';
+                case 'YELLOW': return 'bg-yellow-100 text-yellow-800';
+                case 'RED': return 'bg-red-100 text-red-800';
+                default: return 'bg-gray-100 text-gray-800';
+            }
+        };
+
+        const getThroughputLevel = (number) => {
+            return number.throughput?.level || 'STANDARD';
+        };
+
+        const qualityStats = {
+            green: numbers.filter(n => n.quality_rating === 'GREEN').length,
+            yellow: numbers.filter(n => n.quality_rating === 'YELLOW').length,
+            red: numbers.filter(n => n.quality_rating === 'RED').length,
+            unknown: numbers.filter(n => !n.quality_rating || n.quality_rating === 'N/A').length
+        };
+
+        return (
+            <div className="space-y-6">
+                <div className="bg-white rounded-lg shadow-md p-6">
+                    <h3 className="text-lg font-semibold mb-4">Overview Dashboard</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                        <div className="bg-blue-50 p-4 rounded-lg text-center">
+                            <div className="text-2xl font-bold text-blue-600">{numbers.length}</div>
+                            <div className="text-sm text-gray-600">Total Numbers</div>
+                        </div>
+                        <div className="bg-green-50 p-4 rounded-lg text-center">
+                            <div className="text-2xl font-bold text-green-600">
+                                {numbers.filter(n => n.status === 'VERIFIED').length}
+                            </div>
+                            <div className="text-sm text-gray-600">Verified</div>
+                        </div>
+                        <div className="bg-purple-50 p-4 rounded-lg text-center">
+                            <div className="text-2xl font-bold text-purple-600">
+                                {numbers.filter(n => n.registration_status === 'REGISTERED').length}
+                            </div>
+                            <div className="text-sm text-gray-600">Registered</div>
+                        </div>
+                        <div className="bg-orange-50 p-4 rounded-lg text-center">
+                            <div className="text-2xl font-bold text-orange-600">
+                                {numbers.filter(n => n.account_mode === 'LIVE').length}
+                            </div>
+                            <div className="text-sm text-gray-600">Live Mode</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="bg-white rounded-lg shadow-md p-6">
+                    <h3 className="text-lg font-semibold mb-4">Quality Rating Distribution</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                        <div className="bg-green-50 p-4 rounded-lg text-center">
+                            <div className="text-2xl font-bold text-green-600">{qualityStats.green}</div>
+                            <div className="text-sm text-gray-600">High Quality</div>
+                            <div className="text-xs text-green-600">GREEN Rating</div>
+                        </div>
+                        <div className="bg-yellow-50 p-4 rounded-lg text-center">
+                            <div className="text-2xl font-bold text-yellow-600">{qualityStats.yellow}</div>
+                            <div className="text-sm text-gray-600">Medium Quality</div>
+                            <div className="text-xs text-yellow-600">YELLOW Rating</div>
+                        </div>
+                        <div className="bg-red-50 p-4 rounded-lg text-center">
+                            <div className="text-2xl font-bold text-red-600">{qualityStats.red}</div>
+                            <div className="text-sm text-gray-600">Low Quality</div>
+                            <div className="text-xs text-red-600">RED Rating</div>
+                        </div>
+                        <div className="bg-gray-50 p-4 rounded-lg text-center">
+                            <div className="text-2xl font-bold text-gray-600">{qualityStats.unknown}</div>
+                            <div className="text-sm text-gray-600">Unknown</div>
+                            <div className="text-xs text-gray-600">No Rating</div>
+                        </div>
+                    </div>
+                    
+                    {qualityStats.red > 0 && (
+                        <div className="bg-red-50 p-4 rounded-lg">
+                            <h4 className="font-medium text-red-800 mb-2">
+                                <i className="fas fa-exclamation-triangle mr-2"></i>Quality Alerts
+                            </h4>
+                            <p className="text-sm text-red-700">
+                                {qualityStats.red} number(s) have RED quality rating. Consider reviewing your messaging practices.
+                            </p>
+                        </div>
+                    )}
+                </div>
+
+                <div className="bg-white rounded-lg shadow-md p-6">
+                    <h3 className="text-lg font-semibold mb-4">Detailed Phone Number Status</h3>
+                    <div className="overflow-x-auto">
+                        <table className="w-full">
+                            <thead>
+                                <tr className="border-b bg-gray-50">
+                                    <th className="text-left py-3 px-2 text-sm font-medium">Phone Number</th>
+                                    <th className="text-left py-3 px-2 text-sm font-medium">Quality Rating</th>
+                                    <th className="text-left py-3 px-2 text-sm font-medium">Throughput</th>
+                                    <th className="text-left py-3 px-2 text-sm font-medium">Platform</th>
+                                    <th className="text-left py-3 px-2 text-sm font-medium">Status</th>
+                                    <th className="text-left py-3 px-2 text-sm font-medium">Registration Days Left</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {numbers.map(number => {
+                                    const daysLeft = calculateDaysUntilExpiry(number.created_at);
+                                    const isExpiringSoon = daysLeft <= 30 && daysLeft > 0;
+                                    const isExpired = daysLeft <= 0;
+
+                                    return (
+                                        <tr key={number.id} className="border-b hover:bg-gray-50">
+                                            <td className="py-3 px-2">
+                                                <div className="font-medium">{number.phone_number}</div>
+                                                <div className="text-xs text-gray-500">{number.verified_name}</div>
+                                            </td>
+                                            <td className="py-3 px-2">
+                                                <span className={`px-2 py-1 rounded text-xs font-medium ${getQualityRatingColor(number.quality_rating)}`}>
+                                                    {number.quality_rating || 'N/A'}
+                                                </span>
+                                            </td>
+                                            <td className="py-3 px-2">
+                                                <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
+                                                    {getThroughputLevel(number)}
+                                                </span>
+                                            </td>
+                                            <td className="py-3 px-2">
+                                                <span className="text-xs bg-gray-100 px-2 py-1 rounded">
+                                                    {number.platform_type}
+                                                </span>
+                                            </td>
+                                            <td className="py-3 px-2">
+                                                <div className="flex flex-col gap-1">
+                                                    <span className={`px-2 py-1 rounded text-xs ${
+                                                        number.status === 'VERIFIED' 
+                                                            ? 'bg-green-100 text-green-800' 
+                                                            : 'bg-yellow-100 text-yellow-800'
+                                                    }`}>
+                                                        {number.status}
+                                                    </span>
+                                                    <span className={`px-2 py-1 rounded text-xs ${
+                                                        number.registration_status === 'REGISTERED' 
+                                                            ? 'bg-blue-100 text-blue-800' 
+                                                            : 'bg-gray-100 text-gray-800'
+                                                    }`}>
+                                                        {number.registration_status}
+                                                    </span>
+                                                </div>
+                                            </td>
+                                            <td className="py-3 px-2">
+                                                {number.registration_status === 'REGISTERED' ? (
+                                                    <span className="text-xs text-green-600">✓ Registered</span>
+                                                ) : isExpired ? (
+                                                    <span className="text-xs text-red-600 font-medium">
+                                                        <i className="fas fa-exclamation-circle mr-1"></i>Expired
+                                                    </span>
+                                                ) : isExpiringSoon ? (
+                                                    <span className="text-xs text-yellow-600 font-medium">
+                                                        <i className="fas fa-clock mr-1"></i>{daysLeft} days
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-xs text-green-600">
+                                                        {daysLeft} days
+                                                    </span>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                        {numbers.length === 0 && (
+                            <div className="text-center py-8 text-gray-500">
+                                No phone numbers found
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {numbers.filter(n => calculateDaysUntilExpiry(n.created_at) <= 14 && n.registration_status !== 'REGISTERED').length > 0 && (
+                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                        <h4 className="font-medium text-yellow-800 mb-2">
+                            <i className="fas fa-clock mr-2"></i>Registration Deadline Alert
+                        </h4>
+                        <p className="text-sm text-yellow-700 mb-3">
+                            The following numbers must be registered within 14 days or they will expire:
+                        </p>
+                        <div className="space-y-2">
+                            {numbers.filter(n => calculateDaysUntilExpiry(n.created_at) <= 14 && n.registration_status !== 'REGISTERED').map(number => {
+                                const daysLeft = calculateDaysUntilExpiry(number.created_at);
+                                return (
+                                    <div key={number.id} className="flex justify-between items-center bg-white p-2 rounded">
+                                        <span className="font-medium">{number.phone_number}</span>
+                                        <span className={`text-sm ${daysLeft <= 0 ? 'text-red-600' : 'text-yellow-600'}`}>
+                                            {daysLeft <= 0 ? 'Expired' : `${daysLeft} days left`}
+                                        </span>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+            </div>
+        );
+    };
+
+    return (
+        <div className="min-h-screen bg-gray-100">
+            <header className="bg-white shadow-sm">
+                <div className="container mx-auto px-4 py-4">
+                    <h1 className="text-2xl font-bold text-gray-800">
+                        <i className="fab fa-whatsapp text-green-500 mr-2"></i>
+                        WhatsApp Pre-Verified Numbers Management
+                    </h1>
+                </div>
+            </header>
+
+            <div className="container mx-auto px-4 py-6">
+                {message.text && (
+                    <div className={`mb-4 p-4 rounded-lg ${
+                        message.type === 'success' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                    }`}>
+                        <i className={`fas ${message.type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle'} mr-2`}></i>
+                        {message.text}
+                    </div>
+                )}
+
+                <div className="bg-white rounded-lg shadow-md p-6 mb-6">
+                    <div className="flex justify-between items-center mb-4">
+                        <h2 className="text-lg font-semibold">Configuration</h2>
+                        <button
+                            onClick={loadExistingNumbers}
+                            disabled={loading || !businessPortfolioId || !accessToken}
+                            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm"
+                        >
+                            <i className="fas fa-sync mr-2"></i>Refresh Numbers
+                        </button>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium mb-2">Business Portfolio ID</label>
+                            <input
+                                type="text"
+                                placeholder="Enter your business portfolio ID"
+                                value={businessPortfolioId}
+                                onChange={(e) => setBusinessPortfolioId(e.target.value)}
+                                className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                            <p className="text-xs text-gray-500 mt-1">Stored in browser localStorage</p>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium mb-2">Access Token</label>
+                            <input
+                                type="password"
+                                placeholder="Enter your access token"
+                                value={accessToken}
+                                onChange={(e) => setAccessToken(e.target.value)}
+                                className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                            <p className="text-xs text-gray-500 mt-1">Stored securely in browser localStorage</p>
+                        </div>
+                    </div>
+                    {businessPortfolioId && accessToken && (
+                        <div className="mt-4 p-3 bg-green-50 rounded-lg">
+                            <p className="text-sm text-green-800">
+                                <i className="fas fa-check-circle mr-2"></i>
+                                Configuration loaded and saved
+                            </p>
+                        </div>
+                    )}
+                </div>
+
+                <div className="bg-white rounded-lg shadow-md mb-6">
+                    <div className="flex border-b overflow-x-auto">
+                        <button
+                            className={`px-6 py-3 font-medium whitespace-nowrap ${
+                                activeTab === 'numbers' 
+                                    ? 'border-b-2 border-blue-600 text-blue-600' 
+                                    : 'text-gray-600 hover:text-gray-800'
+                            }`}
+                            onClick={() => setActiveTab('numbers')}
+                        >
+                            <i className="fas fa-phone mr-2"></i>Phone Numbers
+                        </button>
+                        <button
+                            className={`px-6 py-3 font-medium whitespace-nowrap ${
+                                activeTab === 'management' 
+                                    ? 'border-b-2 border-blue-600 text-blue-600' 
+                                    : 'text-gray-600 hover:text-gray-800'
+                            }`}
+                            onClick={() => setActiveTab('management')}
+                        >
+                            <i className="fas fa-tasks mr-2"></i>Phone Management
+                        </button>
+                        <button
+                            className={`px-6 py-3 font-medium whitespace-nowrap ${
+                                activeTab === 'signup' 
+                                    ? 'border-b-2 border-blue-600 text-blue-600' 
+                                    : 'text-gray-600 hover:text-gray-800'
+                            }`}
+                            onClick={() => setActiveTab('signup')}
+                        >
+                            <i className="fas fa-cog mr-2"></i>Embedded Signup
+                        </button>
+                        <button
+                            className={`px-6 py-3 font-medium whitespace-nowrap ${
+                                activeTab === 'status' 
+                                    ? 'border-b-2 border-blue-600 text-blue-600' 
+                                    : 'text-gray-600 hover:text-gray-800'
+                            }`}
+                            onClick={() => setActiveTab('status')}
+                        >
+                            <i className="fas fa-chart-line mr-2"></i>Status Monitoring
+                        </button>
+                    </div>
+                    <div className="p-6">
+                        {activeTab === 'numbers' && <PhoneNumberManagement />}
+                        {activeTab === 'management' && <PhoneManagement />}
+                        {activeTab === 'signup' && <EmbeddedSignupConfig />}
+                        {activeTab === 'status' && <StatusMonitoring />}
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+    </script>
+</body>
+</html>
