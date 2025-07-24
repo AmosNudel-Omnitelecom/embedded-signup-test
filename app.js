@@ -7,6 +7,8 @@ const App = () => {
     const [accessToken, setAccessToken] = useState('');
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState({ type: '', text: '' });
+    const [facebookAppId, setFacebookAppId] = useState('');
+    const [facebookConfigId, setFacebookConfigId] = useState('');
 
     const showMessage = (type, text) => {
         setMessage({ type, text });
@@ -126,6 +128,14 @@ const App = () => {
                     
                     setBusinessPortfolioId(portfolioId);
                     setAccessToken(accessToken);
+                    
+                    // Load Facebook App ID and Config ID from environment variables
+                    if (config.facebookAppId) {
+                        setFacebookAppId(config.facebookAppId);
+                    }
+                    if (config.facebookConfigId) {
+                        setFacebookConfigId(config.facebookConfigId);
+                    }
                     
                     // Load existing numbers when credentials are available
                     if (portfolioId && accessToken) {
@@ -682,7 +692,7 @@ const App = () => {
         );
     };
 
-    const EmbeddedSignupConfig = () => {
+        const EmbeddedSignupConfig = ({ facebookAppId, facebookConfigId }) => {
         const [config, setConfig] = useState({
             setup: {
                 features: ['whatsapp_business_management', 'whatsapp_business_messaging'],
@@ -711,12 +721,12 @@ const App = () => {
             // Initialize SDK when loaded
             window.fbAsyncInit = function() {
                 if (window.FB) {
-                    window.FB.init({
-                        appId: config.appId || 'YOUR_APP_ID',
-                        autoLogAppEvents: true,
-                        xfbml: true,
-                        version: 'v18.0'
-                    });
+                                window.FB.init({
+                appId: facebookAppId || 'YOUR_APP_ID',
+                autoLogAppEvents: true,
+                xfbml: true,
+                version: 'v18.0'
+            });
                 }
             };
 
@@ -762,8 +772,8 @@ const App = () => {
                 return;
             }
 
-            if (!config.appId || !config.configId) {
-                showMessage('error', 'Please enter your App ID and Configuration ID.');
+            if (!facebookAppId || !facebookConfigId) {
+                showMessage('error', 'Facebook App ID and Configuration ID not loaded from environment variables.');
                 return;
             }
 
@@ -786,7 +796,7 @@ const App = () => {
 
             // Launch embedded signup
             window.FB.login(fbLoginCallback, {
-                config_id: config.configId,
+                config_id: facebookConfigId,
                 response_type: 'code',
                 override_default_response_type: true,
                 extras: {
@@ -942,42 +952,55 @@ const launchWhatsAppSignup = () => {
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div>
                                         <label className="block text-sm font-medium mb-2">App ID</label>
-                                        <input
-                                            type="text"
-                                            placeholder="Enter your Facebook App ID"
-                                            value={config.appId || ''}
-                                            onChange={(e) => updateConfig('appId', e.target.value)}
-                                            className="w-full px-3 py-2 border rounded text-sm"
-                                        />
+                                        <div className="px-3 py-2 bg-gray-100 border rounded text-sm">
+                                            {facebookAppId ? (
+                                                <span className="text-green-600">
+                                                    <i className="fas fa-check-circle mr-1"></i>
+                                                    {facebookAppId}
+                                                </span>
+                                            ) : (
+                                                <span className="text-gray-500">
+                                                    <i className="fas fa-spinner fa-spin mr-1"></i>
+                                                    Loading from environment...
+                                                </span>
+                                            )}
+                                        </div>
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium mb-2">Configuration ID</label>
-                                        <input
-                                            type="text"
-                                            placeholder="Enter your configuration ID"
-                                            value={config.configId || ''}
-                                            onChange={(e) => updateConfig('configId', e.target.value)}
-                                            className="w-full px-3 py-2 border rounded text-sm"
-                                        />
+                                        <div className="px-3 py-2 bg-gray-100 border rounded text-sm">
+                                            {facebookConfigId ? (
+                                                <span className="text-green-600">
+                                                    <i className="fas fa-check-circle mr-1"></i>
+                                                    {facebookConfigId}
+                                                </span>
+                                            ) : (
+                                                <span className="text-gray-500">
+                                                    <i className="fas fa-spinner fa-spin mr-1"></i>
+                                                    Loading from environment...
+                                                </span>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
                             </div>
 
-                            <div className="bg-yellow-50 p-3 rounded-lg mb-4">
-                                <p className="text-sm text-yellow-800">
-                                    <i className="fas fa-exclamation-triangle mr-2"></i>
-                                    <strong>Required:</strong> Enter your App ID and Configuration ID above, then click "Launch Embedded Signup" to test the flow.
+                            <div className="bg-green-50 p-3 rounded-lg mb-4">
+                                <p className="text-sm text-green-800">
+                                    <i className="fas fa-check-circle mr-2"></i>
+                                    <strong>Ready:</strong> App ID and Configuration ID loaded from environment variables. Click "Launch Embedded Signup" to test the flow.
                                 </p>
                             </div>
 
                             <div className="text-center">
                                 <button
                                     onClick={() => launchEmbeddedSignup()}
-                                    disabled={!config.appId || !config.configId}
+                                    disabled={!facebookAppId || !facebookConfigId || selectedNumbers.length === 0}
                                     className="bg-green-600 text-white px-8 py-3 rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-lg font-medium"
                                 >
                                     <i className="fab fa-facebook mr-2"></i>
                                     Launch Embedded Signup
+                                    {!facebookAppId || !facebookConfigId ? ' (Loading...)' : ''}
                                 </button>
                             </div>
 
@@ -1238,7 +1261,7 @@ const launchWhatsAppSignup = () => {
                     </div>
                     <div className="p-6">
                         {activeTab === 'numbers' && <PhoneNumberManagement />}
-                        {activeTab === 'signup' && <EmbeddedSignupConfig />}
+                        {activeTab === 'signup' && <EmbeddedSignupConfig facebookAppId={facebookAppId} facebookConfigId={facebookConfigId} />}
                         {activeTab === 'status' && <StatusMonitoring />}
                     </div>
                 </div>
